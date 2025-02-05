@@ -70,11 +70,22 @@ class Configuration:
         self.INFURA_PROJECT_ID: str = self._get_env_str("INFURA_PROJECT_ID")
         self.INFURA_API_KEY: str = self._get_env_str("INFURA_API_KEY")
 
-        self.COINGECKO_FREE_API_KEYS: List[str] = [
-            key.strip() for key in os.getenv("COINGECKO_FREE_API_KEYS", "").split(",") if key.strip()
-        ]
-        self.COINGECKO_API_KEY_TYPE: str = os.getenv("COINGECKO_API_KEY_TYPE", "free").lower()  # Default to "free"
-        self.COINGECKO_PAID_API_KEY: Optional[str] = self._get_env_str("COINGECKO_PAID_API_KEY", None)
+        # CoinGecko API Key Handling
+        self.COINGECKO_API_KEY_TYPE: str = self._get_env_str("COINGECKO_API_KEY_TYPE", "free")
+        if self.COINGECKO_API_KEY_TYPE == "paid":
+            self.COINGECKO_PAID_API_KEY: str = self._get_env_str("COINGECKO_PAID_API_KEY")
+            self.COINGECKO_FREE_API_KEYS: List[str] = []
+        elif self.COINGECKO_API_KEY_TYPE == "free":
+            coingecko_free_keys_raw: str = self._get_env_str("COINGECKO_FREE_API_KEYS")
+            self.COINGECKO_FREE_API_KEYS: List[str] = [
+                key.strip() for key in coingecko_free_keys_raw.split(",")
+            ]
+            # Dynamically assign individual keys as attributes
+            for idx, api_key in enumerate(self.COINGECKO_FREE_API_KEYS):
+                setattr(self, f"COINGECKO_FREE_API_KEY_{idx}", api_key)
+        else:
+            raise ValueError(f"Invalid COINGECKO_API_KEY_TYPE: {self.COINGECKO_API_KEY_TYPE}")
+
 
         self.COINMARKETCAP_API_KEY: str = self._get_env_str("COINMARKETCAP_API_KEY")
         self.CRYPTOCOMPARE_API_KEY: str = self._get_env_str("CRYPTOCOMPARE_API_KEY")
@@ -332,53 +343,56 @@ class Configuration:
         except Exception as e:
             raise RuntimeError(f"Failed to load critical ABIs: {e}")
 
+
     async def _validate_api_keys(self) -> None:
         """Validate required API keys are set and functional."""
-        required_keys = [
-            ('ETHERSCAN_API_KEY', "https://api.etherscan.io/api?module=stats&action=ethprice&apikey={key}"), # Example Etherscan test URL
-            ('INFURA_API_KEY', "https://mainnet.infura.io/v3/{key}"), # Example Infura test URL (might need a real request)
-            
-            # Validate all free-tier API keys
+        required_keys = []
+
+        # Etherscan and Infura API keys
+        required_keys.append(('ETHERSCAN_API_KEY', "https://api.etherscan.io/api?module=stats&action=ethprice&apikey={key}"))  # Example Etherscan test URL
+        required_keys.append(('INFURA_API_KEY', "https://mainnet.infura.io/v3/{key}"))  # Example Infura test URL
+
+
+
+        # Validate all free-tier API keys
+        if self.COINGECKO_API_KEY_TYPE == "free":
             for idx, api_key in enumerate(self.COINGECKO_FREE_API_KEYS):
-                test_url = "https://api.coingecko.com/api/v3/ping?x_cg_demo_api_key={key}".format(key=api_key)
+                test_url = f"https://api.coingecko.com/api/v3/ping?x_cg_demo_api_key={api_key}"
                 required_keys.append((f"COINGECKO_FREE_API_KEY_{idx}", test_url))
 
-            # Validate paid API key if configured
-            if self.COINGECKO_API_KEY_TYPE == "paid":
-                required_keys.append(('COINGECKO_PAID_API_KEY', "https://pro-api.coingecko.com/api/v3/ping?x_cg_pro_api_key={key}"))
+        # Validate paid API key if configured
+        if self.COINGECKO_API_KEY_TYPE == "paid":
+            required_keys.append(('COINGECKO_PAID_API_KEY', "https://pro-api.coingecko.com/api/v3/ping?x_cg_pro_api_key={key}"))
 
-            ('COINMARKETCAP_API_KEY', "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?CMC_PRO_API_KEY={key}&limit=1"), # Example CMC test URL
-            ('CRYPTOCOMPARE_API_KEY', "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD&api_key={key}") # Example CryptoCompare test URL
-        ]
+        # Other API keys
+        required_keys.append(('COINMARKETCAP_API_KEY', "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?CMC_PRO_API_KEY={key}&limit=1"))  # Example CMC test URL
+        required_keys.append(('CRYPTOCOMPARE_API_KEY', "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD&api_key={key}"))  # Example CryptoCompare test URL
 
+        # Validate each API key
         missing_keys = []
-        invalid_keys = [] # To track invalid keys
-
-        async with aiohttp.ClientSession() as session: # Create a session for all requests
+        invalid_keys = []  # To track invalid keys
+        async with aiohttp.ClientSession() as session:  # Create a session for all requests
             for key_name, test_url_template in required_keys:
                 api_key = getattr(self, key_name, None)
                 if not api_key:
                     missing_keys.append(key_name)
-                    continue # Skip to next key if missing
-
+                    continue  # Skip to next key if missing
                 test_url = test_url_template.format(key=api_key)
                 try:
-                    async with session.get(test_url, timeout=10) as response: # Timeout for test requests
-                        if response.status != 200: # Basic check for 200 OK status; might need more specific checks
+                    async with session.get(test_url, timeout=10) as response:  # Timeout for test requests
+                        if response.status != 200:  # Basic check for 200 OK status; might need more specific checks
                             invalid_keys.append(f"{key_name} (Status: {response.status})")
                         else:
-                            logger.debug(f"API key {key_name} validated successfully.") # Debug log for successful validation
-                except Exception as e: # Catch any request exceptions
+                            logger.debug(f"API key {key_name} validated successfully.")  # Debug log for successful validation
+                except Exception as e:  # Catch any request exceptions
                     invalid_keys.append(f"{key_name} (Error: {e})")
-                    logger.warning(f"API key {key_name} validation request failed: {e}") # Warning for request failures
-
+                    logger.warning(f"API key {key_name} validation request failed: {e}")  # Warning for request failures
 
         if missing_keys:
             logger.warning(f"Missing API keys: {', '.join(missing_keys)}")
         if invalid_keys:
-            logger.error(f"Invalid API keys: {', '.join(invalid_keys)}") # Log invalid keys as errors
-            raise ValueError(f"Invalid API keys detected: {', '.join(invalid_keys)}") # Raise exception for invalid keys
-
+            logger.error(f"Invalid API keys: {', '.join(invalid_keys)}")  # Log invalid keys as errors
+            raise ValueError(f"Invalid API keys detected: {', '.join(invalid_keys)}")  # Raise exception for invalid keys
 
     def _validate_addresses(self) -> None:
         """Validate all Ethereum addresses in configuration."""
