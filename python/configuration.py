@@ -57,6 +57,9 @@ class Configuration:
         self.MIN_PROFIT = self._get_env_float("MIN_PROFIT", DEFAULT_MIN_PROFIT)
         self.MIN_BALANCE = self._get_env_float("MIN_BALANCE", DEFAULT_MIN_BALANCE)
 
+        # Add BASE_PATH to defaults
+        self.BASE_PATH = Path(os.getenv("BASE_PATH", str(Path(__file__).parent.parent)))
+
         # Standard addresses
         self.WETH_ADDRESS = MAINNET_ADDRESSES['WETH']
         self.USDC_ADDRESS = MAINNET_ADDRESSES['USDC']
@@ -66,7 +69,13 @@ class Configuration:
         self.ETHERSCAN_API_KEY: str = self._get_env_str("ETHERSCAN_API_KEY")
         self.INFURA_PROJECT_ID: str = self._get_env_str("INFURA_PROJECT_ID")
         self.INFURA_API_KEY: str = self._get_env_str("INFURA_API_KEY")
-        self.COINGECKO_API_KEY: str = self._get_env_str("COINGECKO_API_KEY")
+
+        self.COINGECKO_FREE_API_KEYS: List[str] = [
+            key.strip() for key in os.getenv("COINGECKO_FREE_API_KEYS", "").split(",") if key.strip()
+        ]
+        self.COINGECKO_API_KEY_TYPE: str = os.getenv("COINGECKO_API_KEY_TYPE", "free").lower()  # Default to "free"
+        self.COINGECKO_PAID_API_KEY: Optional[str] = self._get_env_str("COINGECKO_PAID_API_KEY", None)
+
         self.COINMARKETCAP_API_KEY: str = self._get_env_str("COINMARKETCAP_API_KEY")
         self.CRYPTOCOMPARE_API_KEY: str = self._get_env_str("CRYPTOCOMPARE_API_KEY")
         self.HTTP_ENDPOINT: Optional[str] = self._get_env_str("HTTP_ENDPOINT", None)
@@ -328,7 +337,16 @@ class Configuration:
         required_keys = [
             ('ETHERSCAN_API_KEY', "https://api.etherscan.io/api?module=stats&action=ethprice&apikey={key}"), # Example Etherscan test URL
             ('INFURA_API_KEY', "https://mainnet.infura.io/v3/{key}"), # Example Infura test URL (might need a real request)
-            ('COINGECKO_API_KEY', "https://pro-api.coingecko.com/api/v3/ping?x_cg_pro_api_key={key}"), # Example CoinGecko Pro API ping
+            
+            # Validate all free-tier API keys
+            for idx, api_key in enumerate(self.COINGECKO_FREE_API_KEYS):
+                test_url = "https://api.coingecko.com/api/v3/ping?x_cg_demo_api_key={key}".format(key=api_key)
+                required_keys.append((f"COINGECKO_FREE_API_KEY_{idx}", test_url))
+
+            # Validate paid API key if configured
+            if self.COINGECKO_API_KEY_TYPE == "paid":
+                required_keys.append(('COINGECKO_PAID_API_KEY', "https://pro-api.coingecko.com/api/v3/ping?x_cg_pro_api_key={key}"))
+
             ('COINMARKETCAP_API_KEY', "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?CMC_PRO_API_KEY={key}&limit=1"), # Example CMC test URL
             ('CRYPTOCOMPARE_API_KEY', "https://min-api.cryptocompare.com/data/price?fsym=BTC&tsyms=USD&api_key={key}") # Example CryptoCompare test URL
         ]

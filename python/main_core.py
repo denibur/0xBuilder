@@ -76,6 +76,12 @@ class Main_Core:
             'strategy_net': None,
         }
         self._component_health: Dict[str, bool] = {name: False for name in self.components}
+
+        # Assign constants as instance attributes
+        self.WEB3_MAX_RETRIES = WEB3_MAX_RETRIES
+        self.WEB3_RETRY_DELAY = WEB3_RETRY_DELAY
+        self.PROVIDER_TIMEOUT = PROVIDER_TIMEOUT
+
         logger.info("Initializing 0xBuilder...")
 
     async def _initialize_components(self) -> None:
@@ -88,7 +94,7 @@ class Main_Core:
             # Initialize ABI Registry and load ABIs
             logger.debug("Initializing ABI Registry...")
             abi_registry = ABI_Registry()
-            await abi_registry.initialize(self.configuration.BASE_PATH)
+            await abi_registry.initialize(base_path=self.configuration.BASE_PATH)  # Pass BASE_PATH here
             logger.info("ABI Registry initialized ✅")
             # Load and validate ERC20 ABI
             erc20_abi = await self._load_abi(self.configuration.ERC20_ABI, abi_registry)

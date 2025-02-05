@@ -54,6 +54,13 @@ class API_Config:
         self.market_data_cache: TTLCache = TTLCache(maxsize=1000, ttl=1800)  # 30 min cache for market data
         self.token_metadata_cache: TTLCache = TTLCache(maxsize=500, ttl=86400)  # 24h cache for metadata
 
+        # Load API keys from .env
+        self.coingecko_api_key_type = os.getenv("COINGECKO_API_KEY_TYPE", "free").lower()
+        self.coingecko_paid_api_key = os.getenv("COINGECKO_PAID_API_KEY", None)
+        self.coingecko_free_api_keys = os.getenv("COINGECKO_FREE_API_KEYS", "").split(",")
+        self.current_free_api_key_index = 0  # Tracks the current free API key in use
+
+
         # Rate limit tracking
         self.rate_limit_counters: Dict[str, Dict[str, Any]] = {
             "coingecko": {"count": 0, "reset_time": time.time(), "limit": 50},
@@ -83,14 +90,15 @@ class API_Config:
                 "weight": 1.0,
                 "rate_limit": 1200,
             },
+            # Updated CoinGecko configuration with dynamic base URL and API key
             "coingecko": {
-                "base_url": "https://api.coingecko.com/api/v3",
+                "base_url": "https://pro-api.coingecko.com/api/v3" if self.configuration.COINGECKO_API_KEY_TYPE == "paid" else "https://api.coingecko.com/api/v3",
                 "market_url": "/coins/{id}/market_chart",
                 "volume_url": "/coins/{id}",
-                "api_key": configuration.COINGECKO_API_KEY,
+                "api_key": self._get_current_coingecko_api_key(),  # Dynamically select API key
                 "success_rate": 1.0,
                 "weight": 0.8,
-                "rate_limit": 50,
+                "rate_limit": 50 if self.configuration.COINGECKO_API_KEY_TYPE == "free" else 500,
             },
             "coinmarketcap": {
                 "base_url": "https://pro-api.coinmarketcap.com/v1",
@@ -121,6 +129,85 @@ class API_Config:
         self.token_symbol_to_address: Dict[str, str] = {}
         self.symbol_to_api_id: Dict[str, str] = {}  # API-specific identifiers
 
+    # Modify the _fetch_price method to handle rate-limit exceptions and rotate through free-tier API keys.
+    # Update the headers logic to dynamically select the appropriate API key.
+
+    def _get_current_coingecko_api_key(self) -> Optional[str]:
+        """Get the current CoinGecko API key based on configuration."""
+        '''if self.coingecko_api_key_type == "paid":
+            return self.coingecko_paid_api_key
+        elif self.coingecko_api_key_type == "free":
+            if not self.coingecko_free_api_keys:
+                logger.error("No free-tier API keys available.")
+                return None
+            return self.coingecko_free_api_keys[self.current_free_api_key_index]
+        return None
+        '''
+        """
+        Dynamically select the current CoinGecko API key based on configuration.
+        Returns:
+            str: The current API key to use.
+        """
+        if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+            return self.configuration.COINGECKO_PAID_API_KEY
+        elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
+            # Rotate through free-tier API keys
+            if not hasattr(self, "_current_free_api_key_index"):
+                self._current_free_api_key_index = 0
+            api_keys = self.configuration.COINGECKO_FREE_API_KEYS
+            if api_keys:
+                current_key = api_keys[self._current_free_api_key_index]
+                self._current_free_api_key_index = (self._current_free_api_key_index + 1) % len(api_keys)
+                return current_key
+        return None
+
+
+
+    def _rotate_free_api_key(self) -> None:
+        """Rotate to the next free-tier API key."""
+        if self.coingecko_api_key_type == "free":
+            self.current_free_api_key_index = (self.current_free_api_key_index + 1) % len(self.coingecko_free_api_keys)
+            logger.info(f"Rotated to next free-tier API key: {self._get_current_coingecko_api_key()}")
+
+    async def _fetch_price(self, provider: str, token: str, vs_currency: str) -> Optional[float]:
+        """Fetch the price of a token from a specified source."""
+        config = self.api_configs.get(provider)
+        if not config:
+            logger.error(f"API source {provider} not configured.")
+            return None
+
+        # Updated header logic for dynamic API key selection
+        api_key = self._get_current_coingecko_api_key()
+        if api_key:
+            if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+                headers = {"x-cg-pro-api-key": api_key}
+            elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
+                headers = {"x-cg-demo-api-key": api_key}
+        else:
+            headers = None
+
+        try:
+            url = f"{config['base_url']}/simple/price?ids={token}&vs_currencies={vs_currency}"
+            async with self.session.get(url, headers=headers) as response:
+                if response.status == 429:  # Rate limit exceeded
+                    logger.warning(f"Rate limit hit for API key: {api_key}. Rotating to next key.")
+                    self._rotate_free_api_key()
+                    return await self._fetch_price(provider, token, vs_currency)  # Retry with next key
+                elif response.status == 200:
+                    data = await response.json()
+                    if token in data and vs_currency in data[token]:
+                        return data[token][vs_currency]
+                    else:
+                        logger.error(f"Invalid price data format from {provider}: {data}")
+                        return None
+                else:
+                    logger.error(f"Failed to fetch price from {provider}: Status {response.status}")
+                    return None
+        except Exception as e:
+            logger.error(f"Exception fetching price from {provider}: {e}")
+            return None
+
+
     async def __aenter__(self) -> "API_Config":
         self.session = aiohttp.ClientSession()
         return self
@@ -136,11 +223,11 @@ class API_Config:
             self.session = aiohttp.ClientSession()
 
             # Load token addresses and symbols
-            token_addresses = await self.configuration._load_json(
+            token_addresses = await self.configuration._load_json_safe(
                 self.configuration.TOKEN_ADDRESSES,
                 "token addresses"
             )
-            token_symbols = await self.configuration._load_json(
+            token_symbols = await self.configuration._load_json_safe(
                 self.configuration.TOKEN_SYMBOLS,
                 "token symbols"
             )
@@ -237,7 +324,14 @@ class API_Config:
             if source == "coingecko":
                 token_id = token.lower()
                 url = f"{config['base_url']}/coins/{token_id}"
-                headers = {"x-cg-pro-api-key": config['api_key']} if config['api_key'] else None
+                api_key = config['api_key']
+                if api_key:
+                    if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+                        headers = {"x-cg-pro-api-key": api_key}
+                    elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
+                        headers = {"x-cg-demo-api-key": api_key}
+                else:
+                    headers = None
 
                 response = await self.make_request(source, url, headers=headers)
                 if response:

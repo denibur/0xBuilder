@@ -21,7 +21,9 @@ class Configuration {
         this.WALLET_ADDRESS = null;
         this.ETHERSCAN_API_KEY = null;
         this.INFURA_PROJECT_ID = null;
-        this.COINGECKO_API_KEY = null;
+        this.COINGECKO_API_KEYS = []; // Array to store multiple free-tier API keys
+        this.COINGECKO_API_KEY_TYPE = null; // "free" or "paid"
+        this.COINGECKO_PAID_API_KEY = null; // Single paid API key
         this.COINMARKETCAP_API_KEY = null;
         this.CRYPTOCOMPARE_API_KEY = null;
         this.AAVE_POOL_ADDRESS = null;
@@ -97,7 +99,11 @@ class Configuration {
     _loadApiKeys() {
         this.ETHERSCAN_API_KEY = this._getEnvVariable("ETHERSCAN_API_KEY");
         this.INFURA_PROJECT_ID = this._getEnvVariable("INFURA_PROJECT_ID");
-        this.COINGECKO_API_KEY = this._getEnvVariable("COINGECKO_API_KEY");
+        
+        this.COINGECKO_API_KEYS = this._getEnvVariable("COINGECKO_FREE_API_KEYS", "").split(",").map(key => key.trim()).filter(key => key);
+        this.COINGECKO_API_KEY_TYPE = this._getEnvVariable("COINGECKO_API_KEY_TYPE", "free"); // Default to "free"
+        this.COINGECKO_PAID_API_KEY = this._getEnvVariable("COINGECKO_PAID_API_KEY", null);
+
         this.COINMARKETCAP_API_KEY = this._getEnvVariable("COINMARKETCAP_API_KEY");
         this.CRYPTOCOMPARE_API_KEY = this._getEnvVariable("CRYPTOCOMPARE_API_KEY");
     }

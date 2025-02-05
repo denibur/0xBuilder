@@ -352,7 +352,17 @@ class Market_Monitor:
             config = self.api_config.api_configs.get('coingecko')
             if config:
                 url = f"{config['base_url']}/coins/{token_symbol.lower()}"
-                headers = {"x-cg-pro-api-key": config['api_key']} if config['api_key'] else None
+
+                # Updated header logic
+                api_key = self.api_config._get_current_coingecko_api_key()
+                if api_key:
+                    if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+                        headers = {"x-cg-pro-api-key": api_key}
+                    elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
+                        headers = {"x-cg-demo-api-key": api_key}
+                else:
+                    headers = None
+
                 data = await self.api_config.make_request('coingecko', url, headers=headers)
 
                 if data and 'sentiment_votes_up_percentage' in data:
@@ -383,7 +393,16 @@ class Market_Monitor:
             if config:
                 url = f"{config['base_url']}/coins/{token_symbol.lower()}/market_chart"
                 params = {"vs_currency": "usd", "days": "1", "interval": "hourly"}
-                headers = {"x-cg-pro-api-key": config['api_key']} if config['api_key'] else None
+                
+                # Line 386: Same updated logic for consistency
+                api_key = self.api_config._get_current_coingecko_api_key()
+                if api_key:
+                    if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+                        headers = {"x-cg-pro-api-key": api_key}
+                    elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
+                        headers = {"x-cg-demo-api-key": api_key}
+                else:
+                    headers = None
 
                 data = await self.api_config.make_request('coingecko', url, params=params, headers=headers)
                 if data and 'volumes' in data:
