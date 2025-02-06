@@ -116,6 +116,13 @@ class API_Config:
                 "weight": 0.6,
                 "rate_limit": 80,
             },
+            # Add fallback mechanism for Infura
+            "infura": {
+                "base_url": f"https://mainnet.infura.io/v3/{self.configuration.INFURA_API_KEY}" if self.configuration.INFURA_API_KEY else "https://cloudflare-eth.com",
+                "success_rate": 1.0,
+                "weight": 0.9,
+                "rate_limit": 1000,
+            },
         }
 
         # Initialize rate limiters after API configs

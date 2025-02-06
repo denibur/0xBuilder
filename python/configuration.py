@@ -352,7 +352,7 @@ class Configuration:
 
         # Etherscan and Infura API keys
         required_keys.append(('ETHERSCAN_API_KEY', "https://api.etherscan.io/api?module=stats&action=ethprice&apikey={key}"))  # Example Etherscan test URL
-        required_keys.append(('INFURA_API_KEY', "https://mainnet.infura.io/v3/{key}/eth/blockNumber"))  # Example Infura test URL
+        required_keys.append(('INFURA_API_KEY', "https://mainnet.infura.io/v3/{key}"))  # Example Infura test URL
 
         # Validate all free-tier API keys
         if self.COINGECKO_API_KEY_TYPE == "free":
@@ -362,7 +362,8 @@ class Configuration:
 
         # Validate paid API key if configured
         if self.COINGECKO_API_KEY_TYPE == "paid":
-            required_keys.append(('COINGECKO_PAID_API_KEY', "https://pro-api.coingecko.com/api/v3/ping?x_cg_pro_api_key={key}"))
+            test_url = f"https://pro-api.coingecko.com/api/v3/ping?x_cg_pro_api_key={key}"
+            required_keys.append(('COINGECKO_PAID_API_KEY', test_url))
 
         # Other API keys
         required_keys.append(('COINMARKETCAP_API_KEY', "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?CMC_PRO_API_KEY={key}&limit=1"))  # Example CMC test URL
@@ -381,17 +382,35 @@ class Configuration:
 
                 test_url = test_url_template.format(key=api_key)
                 logger.debug(f"Testing API key {key_name} with URL: {test_url}")
-
                 try:
-                    async with session.get(test_url, timeout=10) as response:  # Timeout for test requests
-                        if response.status == 200:  # Basic check for 200 OK status
-                            logger.debug(f"API key {key_name} validated successfully.")
-                        elif response.status == 401 or response.status == 403 or response.status == 404:
-                            logger.error(f"API key {key_name} is invalid or unauthorized (Status: {response.status}).")
-                            invalid_keys.append(f"{key_name} (Status: {response.status})")
-                        else:
-                            logger.error(f"API key {key_name} failed validation (Status: {response.status}).")
-                            invalid_keys.append(f"{key_name} (Status: {response.status})")                        
+                    if key_name == "INFURA_API_KEY":
+                        # Execute POST request for Infura API key validation
+                        async with session.post(test_url, json={
+                            "jsonrpc": "2.0",
+                            "method": "eth_blockNumber",
+                            "params": [],
+                            "id": 1
+                        }, timeout=10) as response:
+                            if response.status == 200:  # Basic check for 200 OK status
+                                logger.debug(f"API key {key_name} validated successfully.")
+                            elif response.status == 401 or response.status == 403 or response.status == 404:
+                                logger.error(f"API key {key_name} is invalid or unauthorized (Status: {response.status}).")
+                                invalid_keys.append(f"{key_name} (Status: {response.status})")
+                            else:
+                                logger.error(f"API key {key_name} failed validation (Status: {response.status}).")
+                                invalid_keys.append(f"{key_name} (Status: {response.status})")                        
+                    else:
+                        # Execute GET request for other API keys
+                        async with session.get(test_url, timeout=10) as response:  # Timeout for test requests
+                            if response.status == 200:  # Basic check for 200 OK status
+                                logger.debug(f"API key {key_name} validated successfully.")
+                            elif response.status == 401 or response.status == 403 or response.status == 404:
+                                logger.error(f"API key {key_name} is invalid or unauthorized (Status: {response.status}).")
+                                invalid_keys.append(f"{key_name} (Status: {response.status})")
+                            else:
+                                logger.error(f"API key {key_name} failed validation (Status: {response.status}).")
+                                invalid_keys.append(f"{key_name} (Status: {response.status})")    
+
                 except asyncio.TimeoutError:
                     logger.error(f"API key {key_name} validation timed out.")
                     invalid_keys.append(f"{key_name} (Error: Timeout)")
