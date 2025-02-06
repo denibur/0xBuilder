@@ -133,17 +133,7 @@ class API_Config:
     # Update the headers logic to dynamically select the appropriate API key.
 
     def _get_current_coingecko_api_key(self) -> Optional[str]:
-        """Get the current CoinGecko API key based on configuration."""
-        '''if self.coingecko_api_key_type == "paid":
-            return self.coingecko_paid_api_key
-        elif self.coingecko_api_key_type == "free":
-            if not self.coingecko_free_api_keys:
-                logger.error("No free-tier API keys available.")
-                return None
-            return self.coingecko_free_api_keys[self.current_free_api_key_index]
-        return None
-        '''
-        """
+         """
         Dynamically select the current CoinGecko API key based on configuration.
         Returns:
             str: The current API key to use.
@@ -152,16 +142,14 @@ class API_Config:
             return self.configuration.COINGECKO_PAID_API_KEY
         elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
             # Rotate through free-tier API keys
-            if not hasattr(self, "_current_free_api_key_index"):
-                self._current_free_api_key_index = 0
+            if not hasattr(self, "current_free_api_key_index"):
+                self.current_free_api_key_index = 0
             api_keys = self.configuration.COINGECKO_FREE_API_KEYS
             if api_keys:
-                current_key = api_keys[self._current_free_api_key_index]
-                self._current_free_api_key_index = (self._current_free_api_key_index + 1) % len(api_keys)
+                current_key = api_keys[self.current_free_api_key_index]
+                self.current_free_api_key_index = (self.current_free_api_key_index + 1) % len(api_keys)
                 return current_key
         return None
-
-
 
     def _rotate_free_api_key(self) -> None:
         """Rotate to the next free-tier API key."""
@@ -169,44 +157,138 @@ class API_Config:
             self.current_free_api_key_index = (self.current_free_api_key_index + 1) % len(self.coingecko_free_api_keys)
             logger.info(f"Rotated to next free-tier API key: {self._get_current_coingecko_api_key()}")
 
-    async def _fetch_price(self, provider: str, token: str, vs_currency: str) -> Optional[float]:
-        """Fetch the price of a token from a specified source."""
-        config = self.api_configs.get(provider)
-        if not config:
-            logger.error(f"API source {provider} not configured.")
-            return None
 
-        # Updated header logic for dynamic API key selection
-        api_key = self._get_current_coingecko_api_key()
-        if api_key:
-            if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
-                headers = {"x-cg-pro-api-key": api_key}
-            elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
-                headers = {"x-cg-demo-api-key": api_key}
-        else:
-            headers = None
+    async def _fetch_price(self, source: str, token: str, vs_currency: str) -> Optional[Decimal]:
+        """
+        Fetch the price of a token from a specified source.
+        Args:
+            source: The API provider (e.g., "infura", "coingecko").
+            token: The token symbol or address.
+            vs_currency: The currency to compare against (e.g., "eth", "usd").
+        Returns:
+            Decimal: The token price if successful, None otherwise.
+        """
+        config = self.api_configs.get(source)
+        if not config:
+            logger.error(f"API source {source} not configured.")
+            return None
 
         try:
-            url = f"{config['base_url']}/simple/price?ids={token}&vs_currencies={vs_currency}"
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 429:  # Rate limit exceeded
-                    logger.warning(f"Rate limit hit for API key: {api_key}. Rotating to next key.")
-                    self._rotate_free_api_key()
-                    return await self._fetch_price(provider, token, vs_currency)  # Retry with next key
-                elif response.status == 200:
-                    data = await response.json()
-                    if token in data and vs_currency in data[token]:
-                        return data[token][vs_currency]
+            # Handle Infura
+            if source == "infura":
+                url = f"https://mainnet.infura.io/v3/{self.configuration.INFURA_API_KEY}"
+                headers = {"Content-Type": "application/json"}
+                payload = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_blockNumber",  # Replace with actual method for price fetching
+                    "params": [],
+                    "id": 1
+                }
+                async with self.session.post(url, json=payload, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.debug(f"Fetched price from {source}: {data}")
+                        return Decimal(str(data.get("result", 0)))  # Adjust based on actual response structure
                     else:
-                        logger.error(f"Invalid price data format from {provider}: {data}")
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
                         return None
-                else:
-                    logger.error(f"Failed to fetch price from {provider}: Status {response.status}")
-                    return None
-        except Exception as e:
-            logger.error(f"Exception fetching price from {provider}: {e}")
-            return None
 
+            # Handle CoinGecko
+            elif source == "coingecko":
+                url = f"{config['base_url']}/simple/price?ids={token}&vs_currencies={vs_currency}"
+                api_key = self._get_current_coingecko_api_key()  # Dynamically select API key
+                headers = {}
+                if api_key:
+                    if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+                        headers["x-cg-pro-api-key"] = api_key
+                    elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
+                        headers["x-cg-demo-api-key"] = api_key
+
+                async with self.session.get(url, headers=headers) as response:
+                    if response.status == 429:  # Rate limit exceeded
+                        logger.warning(f"Rate limit hit for API key: {api_key}. Rotating to next key.")
+                        self._rotate_free_api_key()
+                        return await self._fetch_price(source, token, vs_currency)  # Retry with next key
+                    elif response.status == 200:
+                        data = await response.json()
+                        if token in data and vs_currency in data[token]:
+                            price = Decimal(str(data[token][vs_currency]))
+                            logger.debug(f"Fetched price from {source}: {price}")
+                            return price
+                        else:
+                            logger.error(f"Invalid price data format from {source}: {data}")
+                            return None
+                    else:
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                        return None
+
+            # Handle Binance
+            elif source == "binance":
+                symbols = await self._get_trading_pairs(token)
+                if not symbols:
+                    logger.error(f"No valid trading pairs found for {token} on {source}.")
+                    return None
+
+                for symbol in symbols:
+                    try:
+                        url = f"{config['base_url']}/ticker/24hr"
+                        params = {"symbol": symbol}
+                        async with self.session.get(url, params=params) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                if "lastPrice" in data:
+                                    price = Decimal(str(data["lastPrice"]))
+                                    logger.debug(f"Fetched price from {source}: {price}")
+                                    return price
+                            else:
+                                logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                    except Exception as e:
+                        logger.error(f"Error fetching price for {symbol} from {source}: {e}")
+
+            # Handle CoinMarketCap
+            elif source == "coinmarketcap":
+                url = f"{config['base_url']}/cryptocurrency/quotes/latest"
+                headers = {"X-CMC_PRO_API_KEY": config['api_key']}
+                params = {"symbol": token.upper()}
+                async with self.session.get(url, params=params, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if 'data' in data and token.upper() in data['data']:
+                            price = Decimal(str(data['data'][token.upper()]['quote']['USD']['price']))
+                            logger.debug(f"Fetched price from {source}: {price}")
+                            return price
+                        else:
+                            logger.error(f"Invalid price data format from {source}: {data}")
+                            return None
+                    else:
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                        return None
+
+            # Handle CryptoCompare
+            elif source == "cryptocompare":
+                url = f"{config['base_url']}/price"
+                params = {"fsym": token.upper(), "tsyms": vs_currency.upper(), "api_key": config['api_key']}
+                async with self.session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if vs_currency.upper() in data:
+                            price = Decimal(str(data[vs_currency.upper()]))
+                            logger.debug(f"Fetched price from {source}: {price}")
+                            return price
+                        else:
+                            logger.error(f"Invalid price data format from {source}: {data}")
+                            return None
+                    else:
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                        return None
+
+            else:
+                logger.error(f"Unsupported API source: {source}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Exception fetching price from {source}: {e}")
+            return None
 
     async def __aenter__(self) -> "API_Config":
         self.session = aiohttp.ClientSession()
@@ -417,27 +499,135 @@ class API_Config:
         self.price_cache[cache_key] = Decimal(str(weighted_price))
         return self.price_cache[cache_key]
 
+
     async def _fetch_price(self, source: str, token: str, vs_currency: str) -> Optional[Decimal]:
-        """Fetch the price of a token from a specified source."""
+        """
+        Fetch the price of a token from a specified source.
+        Args:
+            source: The API provider (e.g., "infura", "coingecko").
+            token: The token symbol or address.
+            vs_currency: The currency to compare against (e.g., "eth", "usd").
+        Returns:
+            Decimal: The token price if successful, None otherwise.
+        """
         config = self.api_configs.get(source)
         if not config:
             logger.error(f"API source {source} not configured.")
             return None
 
         try:
-            async with self.session.get(config["base_url"] + f"/simple/price?ids={token}&vs_currencies={vs_currency}") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if token in data and vs_currency in data[token]:
-                        price = Decimal(str(data[token][vs_currency]))
-                        logger.debug(f"Fetched price from {source}: {price}")
-                        return price
+            # Handle Infura
+            if source == "infura":
+                url = f"https://mainnet.infura.io/v3/{self.configuration.INFURA_API_KEY}"
+                headers = {"Content-Type": "application/json"}
+                payload = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_blockNumber",  # Replace with actual method for price fetching
+                    "params": [],
+                    "id": 1
+                }
+                async with self.session.post(url, json=payload, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        logger.debug(f"Fetched price from {source}: {data}")
+                        return Decimal(str(data.get("result", 0)))  # Adjust based on actual response structure
                     else:
-                        logger.error(f"Invalid price data format from {source}: {data}")
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
                         return None
-                else:
-                    logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+
+            # Handle CoinGecko
+            elif source == "coingecko":
+                url = f"{config['base_url']}/simple/price?ids={token}&vs_currencies={vs_currency}"
+                api_key = self._get_current_coingecko_api_key()  # Dynamically select API key
+                headers = {}
+                if api_key:
+                    if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+                        headers["x-cg-pro-api-key"] = api_key
+                    elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
+                        headers["x-cg-demo-api-key"] = api_key
+
+                async with self.session.get(url, headers=headers) as response:
+                    if response.status == 429:  # Rate limit exceeded
+                        logger.warning(f"Rate limit hit for API key: {api_key}. Rotating to next key.")
+                        self._rotate_free_api_key()
+                        return await self._fetch_price(source, token, vs_currency)  # Retry with next key
+                    elif response.status == 200:
+                        data = await response.json()
+                        if token in data and vs_currency in data[token]:
+                            price = Decimal(str(data[token][vs_currency]))
+                            logger.debug(f"Fetched price from {source}: {price}")
+                            return price_get_current_coingecko_api_key
+                        else:
+                            logger.error(f"Invalid price data format from {source}: {data}")
+                            return None
+                    else:
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                        return None
+
+            # Handle Binance
+            elif source == "binance":
+                symbols = await self._get_trading_pairs(token)
+                if not symbols:
+                    logger.error(f"No valid trading pairs found for {token} on {source}.")
                     return None
+
+                for symbol in symbols:
+                    try:
+                        url = f"{config['base_url']}/ticker/24hr"
+                        params = {"symbol": symbol}
+                        async with self.session.get(url, params=params) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                if "lastPrice" in data:
+                                    price = Decimal(str(data["lastPrice"]))
+                                    logger.debug(f"Fetched price from {source}: {price}")
+                                    return price
+                            else:
+                                logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                    except Exception as e:
+                        logger.error(f"Error fetching price for {symbol} from {source}: {e}")
+
+            # Handle CoinMarketCap
+            elif source == "coinmarketcap":
+                url = f"{config['base_url']}/cryptocurrency/quotes/latest"
+                headers = {"X-CMC_PRO_API_KEY": config['api_key']}
+                params = {"symbol": token.upper()}
+                async with self.session.get(url, params=params, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if 'data' in data and token.upper() in data['data']:
+                            price = Decimal(str(data['data'][token.upper()]['quote']['USD']['price']))
+                            logger.debug(f"Fetched price from {source}: {price}")
+                            return price
+                        else:
+                            logger.error(f"Invalid price data format from {source}: {data}")
+                            return None
+                    else:
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                        return None
+
+            # Handle CryptoCompare
+            elif source == "cryptocompare":
+                url = f"{config['base_url']}/price"
+                params = {"fsym": token.upper(), "tsyms": vs_currency.upper(), "api_key": config['api_key']}
+                async with self.session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if vs_currency.upper() in data:
+                            price = Decimal(str(data[vs_currency.upper()]))
+                            logger.debug(f"Fetched price from {source}: {price}")
+                            return price
+                        else:
+                            logger.error(f"Invalid price data format from {source}: {data}")
+                            return None
+                    else:
+                        logger.error(f"Failed to fetch price from {source}: Status {response.status}")
+                        return None
+
+            else:
+                logger.error(f"Unsupported API source: {source}")
+                return None
+
         except Exception as e:
             logger.error(f"Exception fetching price from {source}: {e}")
             return None

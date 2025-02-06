@@ -67,7 +67,6 @@ class Configuration:
 
         # API Keys and Endpoints
         self.ETHERSCAN_API_KEY: str = self._get_env_str("ETHERSCAN_API_KEY")
-        self.INFURA_PROJECT_ID: str = self._get_env_str("INFURA_PROJECT_ID")
         self.INFURA_API_KEY: str = self._get_env_str("INFURA_API_KEY")
 
         # CoinGecko API Key Handling
@@ -345,14 +344,15 @@ class Configuration:
 
 
     async def _validate_api_keys(self) -> None:
-        """Validate required API keys are set and functional."""
+        """
+        Validate required API keys are set and functional.
+        Includes detailed logging for debugging and improved error handling.
+        """
         required_keys = []
 
         # Etherscan and Infura API keys
         required_keys.append(('ETHERSCAN_API_KEY', "https://api.etherscan.io/api?module=stats&action=ethprice&apikey={key}"))  # Example Etherscan test URL
-        required_keys.append(('INFURA_API_KEY', "https://mainnet.infura.io/v3/{key}"))  # Example Infura test URL
-
-
+        required_keys.append(('INFURA_API_KEY', "https://mainnet.infura.io/v3/{key}/eth/blockNumber"))  # Example Infura test URL
 
         # Validate all free-tier API keys
         if self.COINGECKO_API_KEY_TYPE == "free":
@@ -375,19 +375,31 @@ class Configuration:
             for key_name, test_url_template in required_keys:
                 api_key = getattr(self, key_name, None)
                 if not api_key:
+                    logger.warning(f"API key {key_name} is missing.")
                     missing_keys.append(key_name)
                     continue  # Skip to next key if missing
+
                 test_url = test_url_template.format(key=api_key)
+                logger.debug(f"Testing API key {key_name} with URL: {test_url}")
+
                 try:
                     async with session.get(test_url, timeout=10) as response:  # Timeout for test requests
-                        if response.status != 200:  # Basic check for 200 OK status; might need more specific checks
+                        if response.status == 200:  # Basic check for 200 OK status
+                            logger.debug(f"API key {key_name} validated successfully.")
+                        elif response.status == 401 or response.status == 403 or response.status == 404:
+                            logger.error(f"API key {key_name} is invalid or unauthorized (Status: {response.status}).")
                             invalid_keys.append(f"{key_name} (Status: {response.status})")
                         else:
-                            logger.debug(f"API key {key_name} validated successfully.")  # Debug log for successful validation
-                except Exception as e:  # Catch any request exceptions
+                            logger.error(f"API key {key_name} failed validation (Status: {response.status}).")
+                            invalid_keys.append(f"{key_name} (Status: {response.status})")                        
+                except asyncio.TimeoutError:
+                    logger.error(f"API key {key_name} validation timed out.")
+                    invalid_keys.append(f"{key_name} (Error: Timeout)")
+                except Exception as e:   # Catch any request exceptions
+                    logger.error(f"API key {key_name} validation request failed: {e}") # Warning for request failures
                     invalid_keys.append(f"{key_name} (Error: {e})")
-                    logger.warning(f"API key {key_name} validation request failed: {e}")  # Warning for request failures
 
+        # Log summary of missing and invalid keys
         if missing_keys:
             logger.warning(f"Missing API keys: {', '.join(missing_keys)}")
         if invalid_keys:
