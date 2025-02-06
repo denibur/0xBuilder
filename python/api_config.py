@@ -133,23 +133,28 @@ class API_Config:
     # Update the headers logic to dynamically select the appropriate API key.
 
     def _get_current_coingecko_api_key(self) -> Optional[str]:
-         """
+        """
         Dynamically select the current CoinGecko API key based on configuration.
         Returns:
             str: The current API key to use.
         """
         if self.configuration.COINGECKO_API_KEY_TYPE == "paid":
+            # Return the paid API key if configured
             return self.configuration.COINGECKO_PAID_API_KEY
+
         elif self.configuration.COINGECKO_API_KEY_TYPE == "free":
             # Rotate through free-tier API keys
-            if not hasattr(self, "current_free_api_key_index"):
-                self.current_free_api_key_index = 0
+            if not hasattr(self, "_current_free_api_key_index"):
+                self._current_free_api_key_index = 0  # Initialize index if not set
             api_keys = self.configuration.COINGECKO_FREE_API_KEYS
-            if api_keys:
-                current_key = api_keys[self.current_free_api_key_index]
-                self.current_free_api_key_index = (self.current_free_api_key_index + 1) % len(api_keys)
+            if api_keys:  # Ensure there are free API keys available
+                current_key = api_keys[self._current_free_api_key_index]
+                self._current_free_api_key_index = (self._current_free_api_key_index + 1) % len(api_keys)
                 return current_key
+
+        # Return None if no valid API key type is configured
         return None
+
 
     def _rotate_free_api_key(self) -> None:
         """Rotate to the next free-tier API key."""
