@@ -95,6 +95,18 @@ class Mempool_Monitor:
 
         self.abi_registry = ABI_Registry()
 
+    async def __aenter__(self) -> "Mempool_Monitor":
+        """Context manager entry point."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit point."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.debug("MempoolMonitor session closed.")
+
     async def initialize(self) -> None:
         """
         Initialize the Mempool Monitor.
@@ -971,6 +983,8 @@ class Mempool_Monitor:
             self.running = False
             self.stopping = True
             await self.task_queue.join()
+            if self.session and not self.session.closed:
+                await self.session.close()
             logger.debug("Mempool Monitor stopped gracefully.")
 
         except Exception as e:

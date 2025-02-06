@@ -21,7 +21,10 @@ logger = logger.getLogger(__name__)
 
 class Market_Monitor:
     """Advanced market monitoring system for real-time analysis and prediction."""
-
+    """
+    Monitors market conditions, including price movements, liquidity, and volatility.
+    Provides real-time data for decision-making in MEV strategies.
+    """
     # Class Constants
     VOLATILITY_THRESHOLD: float = 0.05  # 5% standard deviation
     LIQUIDITY_THRESHOLD: int = 100_000  # $100,000 in 24h volume
@@ -37,12 +40,23 @@ class Market_Monitor:
         transaction_core: Optional[Any] = None,
     ) -> None:
         """Initialize Market Monitor with required components."""
+        """
+        Initialize the Market Monitor.
+        Args:
+            web3: An AsyncWeb3 instance.
+            configuration: Configuration object containing settings.
+            api_config: API configuration instance.
+            transaction_core: Transaction Core instance (optional).
+        """        
         self.web3: "AsyncWeb3" = web3
         self.configuration: Optional["Configuration"] = configuration
         self.api_config: Optional["API_Config"] = api_config
         self.transaction_core: Optional[Any] = transaction_core  # Store transaction_core reference
         self.price_model: Optional[LinearRegression] = LinearRegression()
         self.model_last_updated: float = 0
+        self.session: Optional[aiohttp.ClientSession] = None  # Managed session
+        self.price_cache: TTLCache = TTLCache(maxsize=1000, ttl=self.configuration.MARKET_MONITOR_CACHE_TTL)
+        self.volatility_cache: TTLCache = TTLCache(maxsize=100, ttl=self.configuration.VOLATILITY_CACHE_TTL)
 
         # Get from config or default
         self.linear_regression_path: str = self.configuration.get_config_value("LINEAR_REGRESSION_PATH")
@@ -81,12 +95,27 @@ class Market_Monitor:
 
         }
 
+    async def __aenter__(self) -> "Market_Monitor":
+        """Context manager entry point."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit point."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.debug("MarketMonitor session closed.")
+
     async def initialize(self) -> None:
         """Initialize market monitor components and load model."""
         try:
             self.price_model = LinearRegression()
             self.model_last_updated = 0
-
+            # Initialize caches
+            self.price_cache = TTLCache(maxsize=1000, ttl=self.configuration.MARKET_MONITOR_CACHE_TTL)
+            self.volatility_cache = TTLCache(maxsize=100, ttl=self.configuration.VOLATILITY_CACHE_TTL)
+          
             # Create directory if it doesn't exist
             os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
 
@@ -125,7 +154,11 @@ class Market_Monitor:
             # Initial model training if needed
             if len(self.historical_data) >= self.MIN_TRAINING_SAMPLES:
                 await self._train_model()
-
+            # Verify web3 connection
+            if not self.web3:
+                raise RuntimeError("Web3 not initialized in Market_Monitor")
+            if not await self.web3.is_connected():
+                raise RuntimeError("Web3 connection failed in Market_Monitor")
             logger.debug("Market Monitor initialized ✅")
 
             # Start update scheduler
@@ -577,6 +610,8 @@ class Market_Monitor:
             # Clear caches and clean up resources
             for cache in self.caches.values():
                 cache.clear()
+            if self.session and not self.session.closed:
+                await self.session.close()                
             logger.debug("Market Monitor stopped.")
         except Exception as e:
             logger.error(f"Error stopping Market Monitor: {e}")

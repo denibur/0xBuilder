@@ -57,6 +57,15 @@ class Configuration:
         self.MIN_PROFIT = self._get_env_float("MIN_PROFIT", DEFAULT_MIN_PROFIT)
         self.MIN_BALANCE = self._get_env_float("MIN_BALANCE", DEFAULT_MIN_BALANCE)
 
+        # Nonce Core settings
+        self.NONCE_CACHE_TTL = self._get_env_int("NONCE_CACHE_TTL", 300)  # Default: 5 minutes
+        self.NONCE_RETRY_DELAY = self._get_env_int("NONCE_RETRY_DELAY", 2)  # Default: 2 seconds
+        self.NONCE_MAX_RETRIES = self._get_env_int("NONCE_MAX_RETRIES", 3)  # Default: 3 retries
+        self.NONCE_TRANSACTION_TIMEOUT = self._get_env_int("NONCE_TRANSACTION_TIMEOUT", 60)  # Default: 60 seconds
+
+        self.SAFETY_NET_CACHE_TTL = int(os.getenv("SAFETY_NET_CACHE_TTL", 300))  # Default to 300 if not set
+        self.SAFETY_NET_GAS_PRICE_TTL = int(os.getenv("SAFETY_NET_GAS_PRICE_TTL", 60))  # Default to 60 if not set
+
         # Add BASE_PATH to defaults
         self.BASE_PATH = Path(os.getenv("BASE_PATH", str(Path(__file__).parent.parent)))
 

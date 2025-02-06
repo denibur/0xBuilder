@@ -84,6 +84,17 @@ class Safety_Net:
                 "base_gas_limit":  21000
             }
 
+    async def __aenter__(self) -> "Safety_Net":
+        """Context manager entry point."""
+        if self.api_config and hasattr(self.api_config, "initialize"):
+            await self.api_config.initialize()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit point."""
+        if self.api_config and hasattr(self.api_config, "close"):
+            await self.api_config.close()
+            logger.debug("SafetyNet session closed.")
 
     async def initialize(self) -> None:
         """Initialize Safety Net components."""
@@ -306,6 +317,8 @@ class Safety_Net:
          try:
             if self.api_config:
                 await self.api_config.close()
+            if self.api_config and hasattr(self.api_config, "close"):
+                await self.api_config.close()                
             logger.debug("Safety Net stopped successfully.")
          except Exception as e:
              logger.error(f"Error stopping safety net: {e}")

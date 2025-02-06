@@ -303,19 +303,30 @@ class API_Config:
             logger.error(f"Exception fetching price from {source}: {e}")
             return None
 
+    async def close(self) -> None:
+        """Close the API client session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.debug("APIConfig session manually closed.")
+
     async def __aenter__(self) -> "API_Config":
-        self.session = aiohttp.ClientSession()
+        """Context manager entry point."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        if self.session:
+        """Context manager exit point."""
+        if self.session and not self.session.closed:
             await self.session.close()
             logger.debug("APIConfig session closed.")
 
     async def initialize(self) -> None:
         """Initialize API configuration."""
         try:
-            self.session = aiohttp.ClientSession()
+            if self.session is None or self.session.closed:
+                self.session = aiohttp.ClientSession()
+            # Load token addresses, symbols, and other initialization logic...
 
             # Load token addresses and symbols
             token_addresses = await self.configuration._load_json_safe(
@@ -349,11 +360,6 @@ class API_Config:
         except Exception as e:
             logger.critical(f"API_Config initialization failed: {e}")
             raise
-
-    async def close(self) -> None:
-        """Close the aiohttp session."""
-        if self.session:
-            await self.session.close()
 
     def get_token_symbol(self, address: str) -> Optional[str]:
         """Get token symbol for an address."""

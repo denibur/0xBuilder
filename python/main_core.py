@@ -110,10 +110,11 @@ class Main_Core:
             self.account = Account.from_key(self.configuration.WALLET_KEY)
             await self._check_account_balance()
             logger.info("Account {self.account.address} initialized ✅")
-            # 2. Initialize API config
+            # 2. Initialize API config with context manager
             logger.debug("Initializing API_Config...")
-            self.components['api_config'] = API_Config(self.configuration)
-            await self.components['api_config'].initialize()
+            async with API_Config(self.configuration) as api_config:
+                self.components['api_config'] = api_config
+                await self.components['api_config'].initialize()
             logger.info("API_Config initialized ✅")
 
             # 3. Initialize nonce core
@@ -141,12 +142,12 @@ class Main_Core:
             # 5. Initialize transaction core
             logger.debug("Initializing Transaction_Core...")
             self.components['transaction_core'] = Transaction_Core(
-                self.web3,
-                self.account,
-                self.configuration.AAVE_FLASHLOAN_ADDRESS,
-                self.configuration.AAVE_FLASHLOAN_ABI,
-                self.configuration.AAVE_POOL_ADDRESS,
-                self.configuration.AAVE_POOL_ABI,
+                web3=self.web3,
+                account=self.account,
+                AAVE_FLASHLOAN_ADDRESS=self.configuration.AAVE_FLASHLOAN_ADDRESS,
+                AAVE_FLASHLOAN_ABI=self.configuration.AAVE_FLASHLOAN_ABI,
+                AAVE_POOL_ADDRESS=self.configuration.AAVE_POOL_ADDRESS,
+                AAVE_POOL_ABI=self.configuration.AAVE_POOL_ABI,
                 api_config=self.components['api_config'],
                 nonce_core=self.components['nonce_core'],
                 safety_net=self.components['safety_net'],
@@ -197,6 +198,18 @@ class Main_Core:
         except Exception as e:
             logger.critical(f"Component initialization failed: {e}")
             raise
+
+    async def __aenter__(self) -> "API_Config":
+        """Context manager entry point."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit point."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.debug("APIConfig session closed.")
 
     async def initialize(self) -> None:
         """Initialize all components with proper error handling."""
@@ -408,6 +421,12 @@ class Main_Core:
             except Exception as e:
                 logger.error(f"Health check error: {e}")
                 await asyncio.sleep(5)  # Back off on error
+
+    async def close(self) -> None:
+        """Close the aiohttp session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.debug("APIConfig session manually closed.")
 
     async def stop(self) -> None:
         """Enhanced graceful shutdown."""

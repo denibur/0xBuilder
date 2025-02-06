@@ -76,6 +76,18 @@ class Transaction_Core:
             self.handle_error(e, "normalize_address", {"address": address})
             raise
 
+    async def __aenter__(self) -> "Transaction_Core":
+        """Context manager entry point."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit point."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            logger.debug("TransactionCore session closed.")
+
     async def initialize(self) -> None:
         """Initialize with proper ABI loading."""
         try:
@@ -773,6 +785,8 @@ class Transaction_Core:
     async def stop(self) -> None:
         """Stop transaction core operations."""
         try:
+            if self.session and not self.session.closed:
+                await self.session.close()            
             await self.safety_net.stop()
             await self.nonce_core.stop()
             logger.debug("Stopped Transaction Core. ")
