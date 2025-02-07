@@ -90,6 +90,15 @@ class Main_Core:
             # 1. First initialize configuration and load ABIs
             logger.debug("Loading Configuration...")
             await self._load_configuration()
+
+            # Ensure Configuration is fully initialized
+            await self.configuration.initialize()
+            
+            # Debugging: Log the state of the Configuration object
+            logger.debug(f"Configuration data: {self.configuration.config_data}")
+            logger.debug(f"MEMPOOL_MAX_RETRIES: {self.configuration.MEMPOOL_MAX_RETRIES}")
+            
+
             logger.info("Configuration initialized ✅")
             # Initialize ABI Registry and load ABIs
             logger.debug("Initializing ABI Registry...")

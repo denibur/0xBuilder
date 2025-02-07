@@ -122,6 +122,12 @@ class Mempool_Monitor:
         """
         try:
             logger.debug("Initializing MempoolMonitor...")
+        
+            # Debugging: Log the state of the Configuration object
+            if self.configuration:
+                logger.debug(f"Configuration data: {self.configuration.config_data}")
+                logger.debug(f"MEMPOOL_MAX_RETRIES: {self.configuration.MEMPOOL_MAX_RETRIES}")
+                        
             # Update ERC20 signatures if available
             if self.configuration and hasattr(self.configuration, 'get_erc20_signatures'):
                 self.function_signatures.update(await self.configuration.get_erc20_signatures())

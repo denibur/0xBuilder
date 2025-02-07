@@ -41,12 +41,67 @@ class Configuration:
         Args:
             env_path: Optional path to the .env file. Defaults to the current directory.
         """
+        self.MEMPOOL_MAX_RETRIES = int(os.getenv("MEMPOOL_MAX_RETRIES", 5))  # Default to 5 retries
+        self.MARKET_MONITOR_CACHE_TTL = int(os.getenv("MARKET_MONITOR_CACHE_TTL", 60))  # Default to 60 seconds
+        self.VOLATILITY_CACHE_TTL = int(os.getenv("VOLATILITY_CACHE_TTL", 300))  # Default to 300 seconds (5 minutes)
+        self.MEMPOOL_MAX_PARALLEL_TASKS = int(os.getenv("MEMPOOL_MAX_PARALLEL_TASKS", 10))  # Default to 10 tasks  
+        self.MEMPOOL_BATCH_SIZE = int(os.getenv("MEMPOOL_BATCH_SIZE", 50))  # Default to 50 transactions per batch
+        
+        # Default configuration values
+        self.DEFAULTS = {
+            "MEMPOOL_MAX_RETRIES": 3,  # Add this line
+            "MEMPOOL_RETRY_DELAY": 2,
+            "ETH_TX_GAS_PRICE_MULTIPLIER": 1.1,
+            "FLASHLOAN_BACK_RUN_PROFIT_PERCENTAGE": 0.95,
+            "DEFAULT_CANCEL_GAS_PRICE_GWEI": 50,
+            "INFURA_API_KEY": None,
+            "COINGECKO_API_KEY_TYPE": "free",
+            "COINGECKO_PAID_API_KEY": None,
+            "COINGECKO_FREE_API_KEYS": [],
+            "COINMARKETCAP_API_KEY": None,
+            "CRYPTOCOMPARE_API_KEY": None,
+            "AAVE_FLASHLOAN_ADDRESS": None,
+            "AAVE_POOL_ADDRESS": None,
+            "UNISWAP_ADDRESS": None,
+            "SUSHISWAP_ADDRESS": None,
+            "WETH_ADDRESS": None,
+            "USDC_ADDRESS": None,
+            "MEV_BUILDERS": [],
+            "TRAINING_DATA_PATH": "./data/training_data.csv",
+            "TOKEN_ADDRESSES": "./config/token_addresses.json",
+            "TOKEN_SYMBOLS": "./config/token_symbols.json",
+        }
+
         self.env_path = env_path if env_path else ".env"
         self._load_env()
         self._initialize_defaults()
         self.signatures: Dict[str, Dict[str, str]] = {}
         self.method_selectors: Dict[str, Dict[str, str]] = {}
         self.BASE_PATH = Path(__file__).parent.parent
+
+    async def initialize(self) -> None:
+        """
+        Initialize configuration by loading from .env and validating required fields.
+        """
+        try:
+            # Load configuration from environment variables
+            self.config_data = {
+                key: os.getenv(key, default)
+                for key, default in self.DEFAULTS.items()
+            }
+
+            # Validate required fields
+            missing_fields = [
+                key for key, value in self.config_data.items() if value is None
+            ]
+            if missing_fields:
+                logger.error(f"Missing required configuration fields: {missing_fields}")
+                raise ValueError(f"Missing required configuration fields: {missing_fields}")
+
+            logger.info("Configuration initialized successfully ✅")
+        except Exception as e:
+            logger.critical(f"Configuration initialization failed: {e}")
+            raise
 
     def _initialize_defaults(self) -> None:
         """Initialize configuration with default values."""

@@ -36,6 +36,8 @@ class Transaction_Core:
         self,
         web3: AsyncWeb3,
         account: Account,
+        AAVE_FLASHLOAN_ABI: str,
+        AAVE_POOL_ABI: str,
         AAVE_FLASHLOAN_ADDRESS: str,
         AAVE_POOL_ADDRESS: str,
         api_config: Optional["API_Config"] = None,
