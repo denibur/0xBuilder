@@ -91,8 +91,6 @@ class Mempool_Monitor:
         }
 
         logger.info("Go for main engine start! ✅...")
-        asyncio.sleep(1) 
-
         self.abi_registry = ABI_Registry()
 
     async def __aenter__(self) -> "Mempool_Monitor":
@@ -122,7 +120,10 @@ class Mempool_Monitor:
         """
         try:
             logger.debug("Initializing MempoolMonitor...")
-        
+
+            # Simulate a brief startup delay
+            await asyncio.sleep(1)
+                        
             # Debugging: Log the state of the Configuration object
             if self.configuration:
                 logger.debug(f"Configuration data: {self.configuration.config_data}")
